@@ -1,0 +1,237 @@
+--- CELL 0 (markdown) ---
+# Exploración de Datos de Diabetes con PySpark
+
+Este notebook realiza la carga y exploración inicial del dataset `diabetes_v1_.csv` utilizando PySpark.
+
+Integrantes: Sebastián Mendieta, Samuel Reyes, Jean Villavicencio.
+
+--- CELL 1 (code) ---
+import os
+import sys
+
+# Apuntar Spark al Python del virtualenv actual (esto estaba dañao)
+os.environ['PYSPARK_PYTHON'] = sys.executable
+os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import DoubleType, IntegerType, FloatType, LongType, StringType
+
+
+# Inicializar la sesión de Spark
+spark = SparkSession.builder \
+    .appName("DiabetesDataExploration") \
+    .getOrCreate()
+
+spark
+
+--- CELL 2 (markdown) ---
+## 1. Carga del Dataset
+
+--- CELL 3 (code) ---
+# Cargar el dataset en un DataFrame de PySpark
+file_path = "diabetes_v1_.csv"
+
+# Asumimos que el CSV tiene encabezado y Spark infiere el esquema y si valió
+df = spark.read.csv(file_path, header=True, inferSchema=True)
+
+# Mostrar el esquema inferido
+df.printSchema()
+
+--- CELL 4 (code) ---
+# Mostrar las primeras filas del dataset
+df.show(5)
+
+--- CELL 5 (markdown) ---
+### Conclusión de la Carga de Datos
+
+El dataset se ha cargado correctamente infiriendo un esquema inicial de **50 columnas**. Observamos una gran mezcla de variables de identificación (`encounter_id`, `patient_nbr`), demográficas (`race`, `gender`, `age`), y una gran cantidad de atributos clínicos. Esto confirma que estamos ante un conjunto de datos tuco. Ideal para descubrir patrones clínicos relevantes y realizar modelos analíticos de alto valor.
+
+--- CELL 6 (markdown) ---
+## 2. Resumen de Variables Numéricas
+
+--- CELL 7 (code) ---
+# Identificar columnas numéricas
+numeric_cols = [f.name for f in df.schema.fields if isinstance(f.dataType, (DoubleType, IntegerType, FloatType, LongType))]
+
+if numeric_cols:
+    print("Variables Numéricas:", numeric_cols)
+    # Mostrar estadísticas descriptivas de algunas variables numéricas
+    # Para no saturar, mostramos de las primeras 5
+    df.select(numeric_cols[:5]).summary().show()
+else:
+    print("No se encontraron variables numéricas.")
+
+--- CELL 8 (markdown) ---
+### Conclusión del Resumen Numérico
+
+Al observar las métricas centrales, confirmamos que contamos con un dataset toraso **50,000 registros**. Identificamos un total de **13 variables numéricas**. Las estadísticas descriptivas básicas, como la media y la desviación estándar, nos indican que existe una variabilidad importante en los datos (por ejemplo, en el tipo de admisión o tiempo en hospital), lo que sugiere que nuestra población de pacientes es diversa en cuanto a que se complica y el manejo de su condición médica.
+
+--- CELL 9 (markdown) ---
+## 3. Resumen de Variables Categóricas
+
+--- CELL 10 (code) ---
+# Identificar columnas categóricas (Strings)
+categorical_cols = [f.name for f in df.schema.fields if isinstance(f.dataType, StringType)]
+
+if categorical_cols:
+    print("Variables Categóricas:", categorical_cols)
+    for col_name in categorical_cols[:3]: # Limitamos a 3 para no saturar la salida
+        print(f"\nConteo de valores para la columna: {col_name}")
+        df.groupBy(col_name).count().orderBy("count", ascending=False).show()
+else:
+    print("No se encontraron variables categóricas.")
+
+--- CELL 11 (markdown) ---
+### Conclusión del Resumen Categórico
+
+Este primer paso a las **36 variables categóricas** revela insights demográficos rapedos de encontrar:
+
+- **Raza y Género:** Predomina significativamente la población `Caucasian` (~74%), y existe un balance general entre géneros con una ligera mayoría para `Female`.
+- **Edad:** Existe una concentración natural en grupos de la tercera edad (especialmente `[70-80)` y `[60-70)`). 
+
+Estos hallazgos son totalmente predecibles con la naturaleza del problema de la diabetes, afectando en mayor partesita a adultos mayores, y nos dan un excelente punto de partida para segmentar o lo que toque
+
+### Observaciones:
+- agregar mas graficos para los tipos de reumenes en las tablas de datos no incluir valores obsolutos sino porcentuales
+
+--- CELL 12 (markdown) ---
+## 4. Descripción Textual del Dataset
+
+Este dataset contiene registros clínicos de pacientes diabéticos extraídos de hospitales de EE.UU. Su objetivo principal suele ser la predicción de readmisión hospitalaria (`readmitted`), lo cual es crucial para mejorar la calidad del cuidado y reducir costos.
+
+**Características Principales:**
+*   **Tamaño:** 50,883 registros y 50 características (features).
+*   **Estructura:** Contiene identificadores de pacientes, características demográficas (raza, género, edad), administrativas (tipo de admisión, tiempo en hospital) y características médicas (diagnósticos ICD-9 agrupados, medicamentos como metformina, insulina, y especialidad del médico).
+*   **Tipos de datos:** Mayoritariamente variables categóricas representadas como strings (`race`, `gender`, `diag_1`), y algunas variables numéricas discretas (`time_in_hospital`, `num_lab_procedures`).
+
+
+--- CELL 13 (markdown) ---
+## 5. Gráficas Resumen de Variables (Visualización)
+
+--- CELL 14 (code) ---
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Configuración de estilo
+sns.set_theme(style="whitegrid")
+
+# Gráfico Cualitativo: Distribución de Raza
+race_pd = df.groupBy('race').count().toPandas()
+
+plt.figure(figsize=(10, 5))
+sns.barplot(data=race_pd.sort_values('count', ascending=False), x='race', y='count', palette='viridis')
+plt.title('Distribución por Raza')
+plt.xticks(rotation=45)
+plt.show()
+
+# Gráfico Cuantitativo: Días en el hospital por género
+# Convertimos las columnas necesarias a Pandas para graficar
+sample_df = df.select('gender', 'time_in_hospital').toPandas()
+# Filtramos géneros desconocidos
+sample_df = sample_df[sample_df['gender'].isin(['Male', 'Female'])]
+
+plt.figure(figsize=(8, 5))
+sns.boxplot(data=sample_df, x='gender', y='time_in_hospital', palette='Set2')
+plt.title('Distribución de Días en el Hospital por Género')
+plt.show()
+
+
+--- CELL 15 (markdown) ---
+## 6. Preparación y Transformación Textual (Pipeline NLP PySpark)
+
+Dado que este es un dataset clínico tabular estructurado y carece de campos de texto libre como tweets o foros, combinaremos las descripciones de especialidades y los diagnósticos en una sola columna **`texto_clinico`**. 
+Insertaremos texto ruidoso simulado (hashtags, @, URLs, signos de puntuación, contracciones) en un registro para demostrar de forma práctica el pipeline de limpieza estipulado en los requerimientos.
+
+
+--- CELL 16 (code) ---
+from pyspark.sql.functions import col, concat_ws, lower, regexp_replace, trim, udf, lit, when
+from pyspark.sql.types import StringType
+import contractions
+
+# UDF para expandir contracciones
+def expand_contractions(text):
+    if text:
+        return contractions.fix(text)
+    return text
+
+expand_contractions_udf = udf(expand_contractions, StringType())
+
+# 1. Crear la columna de texto clínico
+df_text = df.withColumn('texto_clinico', concat_ws(' ', col('medical_specialty'), col('diag_1'), col('diag_2'), col('diag_3')))
+
+# 2. Inyectar ruido simulado en el primer registro para ver la limpieza en acción
+ruido = "Paciente don't react to insulin @doctorHouse #diabetes http://www.hospital.com <br> check glu!"
+df_text = df_text.withColumn(
+    'texto_clinico',
+    when(col('encounter_id') == 110939484, lit(ruido)).otherwise(col('texto_clinico'))
+)
+
+# 3. Pipeline de NLP PySpark
+# NOTA: Se omite dropDuplicates(['texto_limpio']) intencionalmente.
+# En un dataset clínico, miles de pacientes comparten la misma combinación
+# de especialidad y diagnósticos. Aplicar dropDuplicates sobre texto_limpio
+# eliminaría registros de pacientes reales, reduciendo el dataset de ~50,000
+# filas a unos pocos cientos de combinaciones únicas, lo que invalidaría
+# cualquier modelo predictivo en fases posteriores.
+# El pipeline limpia el texto, no filtra pacientes.
+
+
+## OBSERVACION: puede ser un split o verificar ver libreria contractions (extender contracciones)
+## falta primero verificar cada patron no deseado
+df_clean = df_text \
+    .withColumn('texto_limpio', col('texto_clinico')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'@\w+', '')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'#\w+', '')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'<.*?>', '')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'http\S+', '')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r"n't", ' not')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r"'s", ' is')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'diabetis', 'diabetes')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'[^a-zA-Z\s]', ' ')) \
+    .withColumn('texto_limpio', regexp_replace('texto_limpio', r'\s+', ' ')) \
+    .withColumn('texto_limpio', lower(trim('texto_limpio'))) \
+    .filter(col('texto_limpio') != '')
+
+# Mostrar la comparación entre el original con ruido y el resultado limpio
+df_clean.filter(col('encounter_id') == 110939484).select('texto_clinico', 'texto_limpio').show(truncate=False)
+
+
+--- CELL 17 (markdown) ---
+## 7. Verificación de Limpieza (Frecuencia de Palabras y WordCloud)
+
+--- CELL 18 (code) ---
+from pyspark.sql.functions import explode, split
+from wordcloud import WordCloud
+
+# Tokenizar (separar por espacio)
+words_df = df_clean.select(explode(split(col('texto_limpio'), '\s+')).alias('word'))
+words_df = words_df.filter((col('word') != '') & (col('word') != '?'))
+
+# Calcular frecuencias
+word_counts = words_df.groupBy('word').count().orderBy('count', ascending=False)
+
+print("Top 15 palabras más frecuentes:")
+word_counts.show(15)
+
+# Generar WordCloud
+word_counts_pd = word_counts.limit(100).toPandas()
+# Convertimos el DataFrame de frecuencias a un diccionario para wordcloud
+word_freq = dict(zip(word_counts_pd['word'], word_counts_pd['count']))
+
+wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='magma').generate_from_frequencies(word_freq)
+
+plt.figure(figsize=(12, 6))
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis('off')
+plt.title('WordCloud de Diagnósticos y Especialidades Limpias', fontsize=16)
+plt.show()
+
+## Ver sobre "v" "e" y stopwords.
+
+--- CELL 19 (markdown) ---
+## Integrantes:
+
+- Sebastian Mendieta
+- Jean Villavicencio
+- Byron Reyes
+

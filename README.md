@@ -1,0 +1,1 @@
+Revisar diabetes_analisis_completo.ipynb ahí quedó 
